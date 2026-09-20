@@ -108,4 +108,6 @@ its poll interval are all checked without launching the app.
 
 MIT © Ritesh Patel. The planning-flow design (statuses, notes, step-wise
 execution) is ported from [OpenManus](https://github.com/FoundationAgents/OpenManus)
-(MIT, MetaGPT/FoundationAgents); no OpenManus code is included.
+(MIT, MetaGPT/FoundationAgents); no OpenManus code is included. Handflow is an
+independent plugin and is not affiliated with, or endorsed by, Manus or the
+OpenManus project.

@@ -124,7 +124,7 @@ function Progress({ counts }) {
   })
 }
 
-function StepRow({ planId, step, index, isCurrent, onPatched }) {
+function StepRow({ planId, planExecutor, step, index, isCurrent, onPatched }) {
   const isDone = step.status === 'completed'
   const isBlocked = step.status === 'blocked'
   const notes = Array.isArray(step.notes) ? step.notes : []
@@ -162,6 +162,12 @@ function StepRow({ planId, step, index, isCurrent, onPatched }) {
                 ),
                 children: step.title,
               }),
+              step.executor && step.executor !== planExecutor
+                ? jsx('span', {
+                    className: 'shrink-0 font-mono text-[0.625rem] text-(--ui-text-quaternary)',
+                    children: step.executor,
+                  })
+                : null,
             ],
           }),
           isCurrent && notes.length
@@ -277,6 +283,7 @@ function PlanPane() {
             StepRow,
             {
               planId: plan.id,
+              planExecutor: plan.executor || '',
               step,
               index: i + 1,
               isCurrent: step.id === currentId,

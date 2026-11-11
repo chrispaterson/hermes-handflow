@@ -126,3 +126,13 @@ def test_every_mutation_is_on_disk_afterwards(hf_home):
     assert on_disk["steps"][0]["status"] == store.COMPLETED
     assert on_disk["events"], "plan keeps an audit trail"
     assert any(ev["kind"] == "complete" for ev in on_disk["events"])
+
+
+def test_add_records_the_steps_executor(hf_home):
+    import json as _j
+    from handflow.tools import handflow as _h
+    _h({"action": "start", "goal": "G", "steps": ["plan", "implement", "review"]})
+    out = _j.loads(_h({"action": "add", "title": "export ENV", "position": 3, "executor": "sdkdeveloper"}))
+    assert out["step"]["executor"] == "sdkdeveloper"
+    plan = _j.loads(_h({"action": "plan"}))
+    assert "export ENV  (sdkdeveloper)" in plan["plan"]

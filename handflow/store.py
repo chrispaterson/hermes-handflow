@@ -481,9 +481,12 @@ def _auto_start_next(plan: Dict[str, Any], step: Dict[str, Any], note: str) -> N
         _log_event(plan, "auto_complete", str(other.get("id")))
 
 
-def add_step(plan: Dict[str, Any], title: str, position: Optional[int] = None) -> Dict[str, Any]:
-    """Insert a step (replanning). ``position`` is 1-based; default appends."""
-    step = make_step(title)
+def add_step(
+    plan: Dict[str, Any], title: str, position: Optional[int] = None, executor: str = ""
+) -> Dict[str, Any]:
+    """Insert a step (replanning). ``position`` is 1-based; default appends.
+    ``executor`` labels who works this step (e.g. the delegated profile)."""
+    step = make_step(title, str(executor or ""))
     steps = plan.setdefault("steps", [])
     if position is None or not str(position).strip():
         steps.append(step)
@@ -536,7 +539,9 @@ def render(plan: Dict[str, Any], width: int = 0) -> str:
     lines = [f"plan {plan.get('id')}  ({plan.get('status')})", f"goal: {plan.get('goal')}"]
     for i, step in enumerate(plan.get("steps") or [], start=1):
         mark = MARKS.get(step.get("status", NOT_STARTED), "[ ]")
-        lines.append(f"{i}. {mark} {step.get('title', '')}")
+        who = step.get("executor") or ""
+        who = f"  ({who})" if who and who != (plan.get("executor") or "") else ""
+        lines.append(f"{i}. {mark} {step.get('title', '')}{who}")
         for note in step.get("notes") or []:
             lines.append(f"   note: {note}")
     tally = counts(plan)

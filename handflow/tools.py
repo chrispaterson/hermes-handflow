@@ -181,7 +181,7 @@ def handflow(args: Any = None, **kwargs: Any) -> str:
         if status == store.NOT_STARTED:
             store.reopen(plan)
         store.save(plan)
-        return _payload(plan, act, {"step": {"id": step.get("id"), "title": step.get("title")}})
+        return _payload(plan, act, {"step": {"id": step.get("id"), "title": step.get("title"), "executor": step.get("executor", "")}})
 
     if act == "note":
         text = str(kwargs.get("text") or kwargs.get("note") or "").strip()
@@ -199,10 +199,10 @@ def handflow(args: Any = None, **kwargs: Any) -> str:
         title = str(kwargs.get("title") or "").strip()
         if not title:
             return _fail("add needs a title")
-        step = store.add_step(plan, title, kwargs.get("position"))
+        step = store.add_step(plan, title, kwargs.get("position"), str(kwargs.get("executor") or ""))
         store.reopen(plan)
         store.save(plan)
-        return _payload(plan, act, {"step": {"id": step.get("id"), "title": step.get("title")}})
+        return _payload(plan, act, {"step": {"id": step.get("id"), "title": step.get("title"), "executor": step.get("executor", "")}})
 
     # finish / abort
     summary = str(kwargs.get("summary") or kwargs.get("note") or "").strip()
@@ -258,7 +258,7 @@ SCHEMAS: Dict[str, Dict[str, Any]] = {
                 "force": {"type": "boolean", "description": "finish: close even with steps still open"},
                 "plan_id": {"type": "string", "description": "use: plan to make active"},
                 "limit": {"type": "integer", "description": "list: how many plans"},
-                "executor": {"type": "string", "description": "start: label for who works the plan"},
+                "executor": {"type": "string", "description": "start: label for who works the plan; add: who works this step (e.g. a delegated profile)"},
             },
             "required": ["action"],
         },

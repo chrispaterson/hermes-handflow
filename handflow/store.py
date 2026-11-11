@@ -156,16 +156,36 @@ def session_dir(session_id: str) -> str:
     return str(row[0] or "") if row else ""
 
 
+def _is_checkout(path: Path) -> bool:
+    """A real git checkout: ``.git/HEAD`` in a clone, a ``gitdir:`` file in a worktree."""
+    marker = path / ".git"
+    try:
+        if marker.is_dir():
+            return (marker / "HEAD").is_file()
+        if marker.is_file():
+            return marker.read_text(encoding="utf-8", errors="replace").startswith("gitdir:")
+    except OSError:
+        return False
+    return False
+
+
 def checkout_root(path: str) -> str:
-    """Nearest ancestor holding ``.git`` (a dir in a clone, a file in a worktree)."""
+    """Nearest ancestor that is a git checkout, stopping below the home directory.
+
+    ``$HOME`` itself never counts: Desktop sessions start there, and a dotfiles
+    repo (or a stray ``~/.git``) would otherwise put every such session on one plan.
+    """
     if not path:
         return ""
     try:
         current = Path(path).expanduser().resolve()
+        home = Path.home().resolve()
     except OSError:
         return ""
     for candidate in (current, *current.parents):
-        if (candidate / ".git").exists():
+        if candidate == home or candidate == candidate.parent:
+            return ""
+        if _is_checkout(candidate):
             return str(candidate)
     return ""
 

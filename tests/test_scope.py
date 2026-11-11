@@ -46,7 +46,25 @@ def checkout(path: Path, worktree: bool = False) -> Path:
         (path / ".git").write_text("gitdir: /elsewhere/.git/worktrees/x\n")
     else:
         (path / ".git").mkdir()
+        (path / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
     return path
+
+
+def test_home_directory_is_never_a_project(hf_home, monkeypatch, sessions, tmp_path):
+    """Regression: a stray ~/.git (or a dotfiles repo) put every $HOME session on one plan."""
+    monkeypatch.setenv("HANDFLOW_SCOPE", "project")
+    home = checkout(tmp_path / "home")
+    monkeypatch.setenv("HOME", str(home))
+    (home / "notes").mkdir()
+    sessions("h1", home)
+    sessions("h2", home / "notes")
+    assert store.scope_key("h1") == "session:h1"
+    assert store.scope_key("h2") == "session:h2"
+
+
+def test_an_invalid_git_dir_is_not_a_checkout(tmp_path):
+    (tmp_path / "x" / ".git").mkdir(parents=True)
+    assert store.checkout_root(str(tmp_path / "x")) == ""
 
 
 # --------------------------------------------------------------------------- #

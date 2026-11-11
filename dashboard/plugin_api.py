@@ -79,14 +79,14 @@ def health() -> Dict[str, Any]:
 @router.get("/active")
 def active(session_id: str = "") -> JSONResponse:
     """The active plan for the pane's focused session (``plan_scope`` decides the key)."""
-    return JSONResponse(_view(store.active_plan(store.scope_key(session_id))))
+    return JSONResponse(_view(store.resolve(session_id)[1]))
 
 
 @router.get("/plans")
 def plans(limit: int = 20, session_id: str = "") -> Dict[str, Any]:
     return {
         "ok": True,
-        "active_plan_id": store.active_plan_id(store.scope_key(session_id)),
+        "active_plan_id": ((store.resolve(session_id)[1]) or {}).get("id", ""),
         "plans": [
             {
                 "plan_id": p.get("id"),
@@ -137,7 +137,8 @@ def set_active(payload: Optional[Dict[str, Any]] = Body(default=None)) -> JSONRe
     plan = store.load(plan_id) if plan_id else None
     if plan is None:
         return JSONResponse({"ok": False, "error": f"no plan {plan_id!r}"}, status_code=404)
-    store.set_active(plan_id, store.scope_key(str(payload.get("session_id") or "")))
+    sid = str(payload.get("session_id") or "")
+    store.pin(plan_id, store.scope_key(sid), sid)
     return JSONResponse(_view(plan))
 
 

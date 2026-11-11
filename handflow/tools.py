@@ -77,11 +77,6 @@ _CONTEXT_KWARGS = frozenset(
 )
 
 
-def _require_active(key: str = "") -> Any:
-    plan = store.active_plan(key)
-    return plan
-
-
 def _clean_steps(raw: Any) -> List[str]:
     """Accept a list of titles or the same text as bullets ("- a", "2. b")."""
     if isinstance(raw, str):
@@ -114,7 +109,8 @@ def handflow(args: Any = None, **kwargs: Any) -> str:
     if act not in ACTIONS:
         return _fail(f"action must be one of: {', '.join(ACTIONS)}")
     # Which active plan this call sees: per profile, session, or project.
-    key = store.scope_key(str(kwargs.get("session_id") or ""))
+    session_id = str(kwargs.get("session_id") or "")
+    key = store.scope_key(session_id)
     kwargs = params
 
     if act == "start":
@@ -128,7 +124,7 @@ def handflow(args: Any = None, **kwargs: Any) -> str:
         if key:
             plan["scope_key"] = key
         store.save(plan)
-        store.set_active(plan["id"], key)
+        store.pin(plan["id"], key, session_id)
         return _payload(plan, act)
 
     if act == "list":
@@ -158,10 +154,10 @@ def handflow(args: Any = None, **kwargs: Any) -> str:
         plan = store.load(plan_id) if plan_id else None
         if plan is None:
             return _fail(f"no plan {plan_id!r}")
-        store.set_active(plan_id, key)
+        store.pin(plan_id, key, session_id)
         return _payload(store.reindex(plan), act)
 
-    plan = _require_active(key)
+    key, plan = store.resolve(session_id)
     if plan is None:
         return _fail("no active plan — call handflow with action='start' (goal + steps) first")
     store.reindex(plan)

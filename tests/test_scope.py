@@ -196,6 +196,42 @@ def test_project_scope_falls_back_to_session_outside_a_checkout(hf_home, monkeyp
     assert run("h1", action="plan")["plan_id"] == one["plan_id"] != two["plan_id"]
 
 
+def test_project_scope_follows_a_session_that_changes_checkout(hf_home, monkeypatch, sessions, tmp_path):
+    """A session that starts its plan in one checkout and then moves (cd, desktop_project)
+    keeps its plan, and the new checkout's key is re-pinned so subagents there share it."""
+    monkeypatch.setenv("HANDFLOW_SCOPE", "project")
+    main = checkout(tmp_path / "main")
+    wt = checkout(tmp_path / "GRAPH-1", worktree=True)
+    sessions("orch", main)
+    started = run("orch", action="start", goal="G", steps=["one", "two"])
+
+    db = sqlite3.connect(Path(store._hermes_home()) / "state.db")
+    db.execute("UPDATE sessions SET cwd = ? WHERE id = 'orch'", (str(wt),))
+    db.commit()
+    db.close()
+    sessions("child", wt)
+
+    assert run("orch", action="complete")["plan_id"] == started["plan_id"]
+    assert store.active_plan_id(f"project:{wt.resolve()}") == started["plan_id"]
+    assert run("child", action="plan")["plan_id"] == started["plan_id"]
+
+
+def test_moving_session_does_not_hijack_a_checkout_with_its_own_plan(hf_home, monkeypatch, sessions, tmp_path):
+    monkeypatch.setenv("HANDFLOW_SCOPE", "project")
+    a = checkout(tmp_path / "A", worktree=True)
+    b = checkout(tmp_path / "B", worktree=True)
+    sessions("s1", a)
+    sessions("s2", b)
+    run("s1", action="start", goal="one", steps=["x"])
+    two = run("s2", action="start", goal="two", steps=["y"])
+
+    db = sqlite3.connect(Path(store._hermes_home()) / "state.db")
+    db.execute("UPDATE sessions SET cwd = ? WHERE id = 's1'", (str(b),))
+    db.commit()
+    db.close()
+    assert run("s1", action="plan")["plan_id"] == two["plan_id"]
+
+
 def test_project_scope_survives_a_missing_session_store(hf_home, monkeypatch):
     monkeypatch.setenv("HANDFLOW_SCOPE", "project")
     assert store.scope_key("nowhere") == "session:nowhere"

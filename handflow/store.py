@@ -207,6 +207,38 @@ def scope_key(session_id: str = "", scope: str = "") -> str:
     return f"session:{session_id}"
 
 
+def _session_key(session_id: str) -> str:
+    return f"session:{session_id}"
+
+
+def pin(plan_id: str, key: str, session_id: str = "") -> None:
+    """Make ``plan_id`` active for ``key``. A project key also pins the session's own
+    pointer, so the plan survives the session changing checkout (see ``resolve``)."""
+    set_active(plan_id, key)
+    session_id = str(session_id or "").strip()
+    if session_id and key.startswith("project:"):
+        set_active(plan_id, _session_key(session_id))
+
+
+def resolve(session_id: str = "", scope: str = "") -> "tuple[str, Optional[Dict[str, Any]]]":
+    """``(key, active plan)`` for a caller.
+
+    Under project scope the key follows the session's *current* checkout. A session
+    that started its plan in one checkout and then moved (a ``cd``, ``desktop_project``)
+    would lose it, so when the checkout has no plan of its own, fall back to the
+    session's pointer and re-pin the new checkout to that plan (subagents working
+    there then share it). A checkout that already has a plan is never taken over.
+    """
+    key = scope_key(session_id, scope)
+    plan = active_plan(key)
+    session_id = str(session_id or "").strip()
+    if plan is None and session_id and key.startswith("project:"):
+        plan = active_plan(_session_key(session_id))
+        if plan is not None and plan.get("status") == "active":
+            set_active(plan["id"], key)
+    return key, plan
+
+
 def plan_path(plan_id: str) -> Path:
     safe = "".join(c for c in plan_id if c.isalnum() or c in "-_")
     if not safe:

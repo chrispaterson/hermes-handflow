@@ -69,8 +69,16 @@ def _payload(plan: Dict[str, Any], action: str, extra: Optional[Dict[str, Any]] 
     return json.dumps(body, ensure_ascii=False, indent=1)
 
 
-def _require_active() -> Any:
-    plan = store.active_plan()
+# Context the tool registry injects next to the model's arguments. These are
+# never read from the model's own arguments object, so a model cannot pick
+# another session's plan by passing ``session_id`` itself.
+_CONTEXT_KWARGS = frozenset(
+    {"session_id", "task_id", "tool_call_id", "turn_id", "user_task", "parent_agent", "api_request_id", "conversation_id"}
+)
+
+
+def _require_active(key: str = "") -> Any:
+    plan = store.active_plan(key)
     return plan
 
 
@@ -99,10 +107,14 @@ def handflow(args: Any = None, **kwargs: Any) -> str:
     CLI), but the dict form is the one the agent uses.
     """
     params: Dict[str, Any] = dict(args) if isinstance(args, Mapping) else {}
-    params.update(kwargs)
+    for name in _CONTEXT_KWARGS:
+        params.pop(name, None)
+    params.update({k: v for k, v in kwargs.items() if k not in _CONTEXT_KWARGS})
     act = str(params.get("action") or "").strip().lower()
     if act not in ACTIONS:
         return _fail(f"action must be one of: {', '.join(ACTIONS)}")
+    # Which active plan this call sees: per profile, session, or project.
+    key = store.scope_key(str(kwargs.get("session_id") or ""))
     kwargs = params
 
     if act == "start":
@@ -113,8 +125,10 @@ def handflow(args: Any = None, **kwargs: Any) -> str:
         if not steps:
             return _fail("start needs steps (list of step titles)")
         plan = store.new_plan(goal, steps, executor=str(kwargs.get("executor") or ""))
+        if key:
+            plan["scope_key"] = key
         store.save(plan)
-        store.set_active(plan["id"])
+        store.set_active(plan["id"], key)
         return _payload(plan, act)
 
     if act == "list":
@@ -123,7 +137,7 @@ def handflow(args: Any = None, **kwargs: Any) -> str:
             {
                 "ok": True,
                 "action": act,
-                "active": store.active_plan_id(),
+                "active": store.active_plan_id(key),
                 "plans": [
                     {
                         "plan_id": p.get("id"),
@@ -144,10 +158,10 @@ def handflow(args: Any = None, **kwargs: Any) -> str:
         plan = store.load(plan_id) if plan_id else None
         if plan is None:
             return _fail(f"no plan {plan_id!r}")
-        store.set_active(plan_id)
+        store.set_active(plan_id, key)
         return _payload(store.reindex(plan), act)
 
-    plan = _require_active()
+    plan = _require_active(key)
     if plan is None:
         return _fail("no active plan — call handflow with action='start' (goal + steps) first")
     store.reindex(plan)

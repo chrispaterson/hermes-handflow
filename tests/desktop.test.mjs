@@ -18,7 +18,7 @@ import { createContext, runInContext } from 'node:vm'
 const SRC = readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
 
 /** Load the plugin body with a stubbed SDK and return its registration + entries. */
-function load({ queryData = null, queryError = null } = {}) {
+function load({ queryData = null, queryError = null, focused } = {}) {
   const calls = []
   const registered = []
 
@@ -31,14 +31,21 @@ function load({ queryData = null, queryError = null } = {}) {
   assert.ok(body.includes('globalThis.plugin = {'), 'default export was not rewritten')
 
   const refetch = []
+  const queries = []
   const sandbox = {
     console,
     ctx: { rest: (path, opts) => { calls.push({ path, opts }); return Promise.resolve(queryData) } },
     cn: (...parts) => parts.filter(Boolean).join(' '),
-    host: { notify: () => {} },
+    host: {
+      notify: () => {},
+      // focusedStoredSessionId is an atom; the stub atom just carries its value.
+      ...(focused === undefined ? {} : { state: { focusedStoredSessionId: { value: focused } } }),
+    },
+    useValue: (atom) => atom.value,
     STATUSBAR_AREAS: { left: 'statusbar-left', center: 'statusbar-center', right: 'statusbar-right' },
     useQuery: (options) => {
       refetch.push(options.refetchInterval)
+      queries.push(options)
       return queryError
         ? { data: undefined, isError: true, error: queryError }
         : { data: queryData, isError: false, error: null }
@@ -60,7 +67,7 @@ function load({ queryData = null, queryError = null } = {}) {
     rest: sandbox.ctx.rest,
   })
 
-  return { plugin, registered, calls, refetch }
+  return { plugin, registered, calls, refetch, queries }
 }
 
 /** Every string drawn anywhere in a rendered tree. */
@@ -168,4 +175,22 @@ test('a backend error still renders (fails soft, no throw)', () => {
   const drawn = texts(registered[0].render()).join(' ')
   assert.match(drawn, /unreachable/i)
   assert.match(texts(registered[1].render()).join(' '), /▤ —/)
+})
+
+test('the pane asks for the focused session\'s plan', async () => {
+  const { registered, calls, queries } = load({ queryData: PLAN, focused: 'local-abc 1' })
+  texts(registered[0].render())
+  const query = queries.find((q) => q.queryKey.includes('active'))
+  assert.ok(query.queryKey.includes('local-abc 1'), 'focused session missing from the query key')
+  await query.queryFn()
+  assert.equal(calls.at(-1).path, '/active?session_id=local-abc%201')
+})
+
+test('without a focused session the pane falls back to /active', async () => {
+  for (const focused of [undefined, '', null]) {
+    const { registered, calls, queries } = load({ queryData: PLAN, focused })
+    texts(registered[0].render())
+    await queries.find((q) => q.queryKey.includes('active')).queryFn()
+    assert.equal(calls.at(-1).path, '/active')
+  }
 })

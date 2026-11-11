@@ -21,6 +21,7 @@ import {
   STATUSBAR_AREAS,
   useQuery,
   useQueryClient,
+  useValue,
 } from '@hermes/plugin-sdk'
 import { jsx, jsxs } from 'react/jsx-runtime'
 import { useState } from 'react'
@@ -77,10 +78,23 @@ function op(step) {
   return 'begin'
 }
 
+// The session the user is looking at. Tile focus, not just the active tab, so
+// split views show the plan of whichever session was clicked last.
+function useFocusedSession() {
+  const atom = host && host.state ? host.state.focusedStoredSessionId : null
+  const id = atom && typeof useValue === 'function' ? useValue(atom) : ''
+  return typeof id === 'string' ? id : ''
+}
+
+function activePath(sessionId) {
+  return sessionId ? `/active?session_id=${encodeURIComponent(sessionId)}` : '/active'
+}
+
 function useActive() {
+  const sessionId = useFocusedSession()
   return useQuery({
-    queryKey: [ID, 'active'],
-    queryFn: () => ctxRest('/active', { timeoutMs: 8000 }),
+    queryKey: [ID, 'active', sessionId],
+    queryFn: () => ctxRest(activePath(sessionId), { timeoutMs: 8000 }),
     refetchInterval: 3000,
     retry: 1,
   })

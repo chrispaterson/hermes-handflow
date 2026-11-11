@@ -21,4 +21,8 @@ def hf_home(tmp_path, monkeypatch):
     """Point the store at a throwaway dir, so a passing suite never touches live plans."""
     home = tmp_path / "handflow"
     monkeypatch.setenv("HANDFLOW_HOME", str(home))
+    # Never read the operator's session store or plan_scope setting either.
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
+    monkeypatch.delenv("HANDFLOW_SCOPE", raising=False)
+    monkeypatch.setattr("handflow.store._configured_scope", lambda: "")
     return home

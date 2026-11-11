@@ -4,11 +4,12 @@ Mounted by the Hermes server at ``/api/plugins/handflow/`` and reached from the
 pane as ``ctx.rest('/active')``::
 
     GET  /health                          liveness + resolved state dir
-    GET  /active                          the active plan (null when there is none)
+    GET  /active?session_id=…             the active plan (null when there is none);
+                                          session_id picks the scoped plan
     GET  /plans?limit=20                  recent plans, newest first
     GET  /plans/{plan_id}                 one plan
     POST /plans/{plan_id}/steps/{step_id} {"op": "complete|begin|block|reopen", "note": "…"}
-    POST /active                          {"plan_id": "…"} pin a plan
+    POST /active                          {"plan_id": "…", "session_id": "…"} pin a plan
 
 Reads and writes the same JSON files the ``handflow`` agent tool uses, so the
 pane and the agent can never disagree. Nothing here calls a model, opens a
@@ -76,15 +77,16 @@ def health() -> Dict[str, Any]:
 
 
 @router.get("/active")
-def active() -> JSONResponse:
-    return JSONResponse(_view(store.active_plan()))
+def active(session_id: str = "") -> JSONResponse:
+    """The active plan for the pane's focused session (``plan_scope`` decides the key)."""
+    return JSONResponse(_view(store.active_plan(store.scope_key(session_id))))
 
 
 @router.get("/plans")
-def plans(limit: int = 20) -> Dict[str, Any]:
+def plans(limit: int = 20, session_id: str = "") -> Dict[str, Any]:
     return {
         "ok": True,
-        "active_plan_id": store.active_plan_id(),
+        "active_plan_id": store.active_plan_id(store.scope_key(session_id)),
         "plans": [
             {
                 "plan_id": p.get("id"),
@@ -135,7 +137,7 @@ def set_active(payload: Optional[Dict[str, Any]] = Body(default=None)) -> JSONRe
     plan = store.load(plan_id) if plan_id else None
     if plan is None:
         return JSONResponse({"ok": False, "error": f"no plan {plan_id!r}"}, status_code=404)
-    store.set_active(plan_id)
+    store.set_active(plan_id, store.scope_key(str(payload.get("session_id") or "")))
     return JSONResponse(_view(plan))
 
 

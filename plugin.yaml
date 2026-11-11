@@ -33,6 +33,15 @@ config_schema:
     description: >
       Where plan JSON lives. Empty means $HERMES_HOME/handflow, which is what you
       want unless you deliberately want plans shared across profiles.
+  plan_scope:
+    type: string
+    default: profile
+    description: >
+      Which sessions share an active plan. "profile" (default): one per profile.
+      "session": one per Hermes session. "project": one per git checkout of the
+      session's working directory, so subagents and Kanban workers in the same
+      worktree share the plan; sessions outside a git checkout fall back to
+      "session". HANDFLOW_SCOPE in the environment overrides this.
   pane_refresh_ms:
     type: integer
     default: 2000

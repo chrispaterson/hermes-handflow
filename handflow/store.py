@@ -11,16 +11,28 @@ visible spine instead of a scrollback.
 Layout under ``$HERMES_HOME/handflow`` (override with ``HANDFLOW_HOME``)::
 
     plans/<plan_id>.json    one file per plan
-    active.json             {"plan_id": "..."} — the plan the pane shows
+    active.json             {"plan_id": "..."} — the profile-wide active plan
+    active/<hash>.json      {"plan_id": "...", "key": "..."} — one per scope key
+
+Which "active" pointer a call uses depends on the ``plan_scope`` setting:
+
+* ``profile`` (default) — one active plan per profile, ``active.json``. This is
+  the original behaviour.
+* ``session`` — one active plan per Hermes session.
+* ``project`` — one active plan per git checkout (worktree root of the
+  session's cwd), so a session and the subagents it spawns share one plan.
+  A session whose cwd is not inside a git checkout falls back to ``session``.
 
 Stdlib only. Every write is atomic (temp file + ``os.replace``).
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import random
+import sqlite3
 import string
 import time
 from pathlib import Path
@@ -54,6 +66,14 @@ _VERBS = {
 
 PLANS_SUBDIR = "plans"
 ACTIVE_FILE = "active.json"
+ACTIVE_SUBDIR = "active"
+
+SCOPE_PROFILE = "profile"
+SCOPE_SESSION = "session"
+SCOPE_PROJECT = "project"
+SCOPES = (SCOPE_PROFILE, SCOPE_SESSION, SCOPE_PROJECT)
+
+PLUGIN_ID = "handflow"
 
 
 # --------------------------------------------------------------------------- #
@@ -74,8 +94,97 @@ def plans_dir() -> Path:
     return state_root() / PLANS_SUBDIR
 
 
-def active_path() -> Path:
-    return state_root() / ACTIVE_FILE
+def active_path(key: str = "") -> Path:
+    """The pointer file for ``key``; the empty key is the profile-wide ``active.json``."""
+    if not key:
+        return state_root() / ACTIVE_FILE
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
+    return state_root() / ACTIVE_SUBDIR / f"{digest}.json"
+
+
+# --------------------------------------------------------------------------- #
+# scope: which "active plan" a caller sees
+# --------------------------------------------------------------------------- #
+
+
+def _hermes_home() -> Path:
+    return Path(os.environ.get("HERMES_HOME", "").strip() or "~/.hermes").expanduser()
+
+
+def _configured_scope() -> str:
+    """``plugins.entries.handflow.settings.plan_scope`` from the Hermes config, if readable.
+
+    Read per call (the setting can change while Hermes runs) and only when the
+    Hermes config loader is importable, so the store still works standalone.
+    """
+    try:
+        from hermes_cli.config import load_config_readonly  # type: ignore
+    except Exception:
+        return ""
+    try:
+        config = load_config_readonly() or {}
+    except Exception:
+        return ""
+    entry = ((config.get("plugins") or {}).get("entries") or {}).get(PLUGIN_ID) or {}
+    for subtree in ("settings", "config"):
+        value = (entry.get(subtree) or {}).get("plan_scope") if isinstance(entry, dict) else None
+        if value:
+            return str(value)
+    return ""
+
+
+def plan_scope() -> str:
+    """The configured scope: ``HANDFLOW_SCOPE`` env, then plugin settings, then ``profile``."""
+    raw = os.environ.get("HANDFLOW_SCOPE", "").strip() or _configured_scope()
+    scope = raw.strip().lower()
+    return scope if scope in SCOPES else SCOPE_PROFILE
+
+
+def session_dir(session_id: str) -> str:
+    """The session's working directory from Hermes' session store (read-only)."""
+    db = _hermes_home() / "state.db"
+    if not session_id or not db.is_file():
+        return ""
+    try:
+        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)
+        try:
+            row = conn.execute("SELECT cwd FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return ""
+    return str(row[0] or "") if row else ""
+
+
+def checkout_root(path: str) -> str:
+    """Nearest ancestor holding ``.git`` (a dir in a clone, a file in a worktree)."""
+    if not path:
+        return ""
+    try:
+        current = Path(path).expanduser().resolve()
+    except OSError:
+        return ""
+    for candidate in (current, *current.parents):
+        if (candidate / ".git").exists():
+            return str(candidate)
+    return ""
+
+
+def scope_key(session_id: str = "", scope: str = "") -> str:
+    """The pointer key for a caller. Empty means the profile-wide pointer.
+
+    No session id (CLI, tests, an older Hermes) always resolves to the profile
+    pointer, so the tool keeps working wherever it runs.
+    """
+    scope = scope or plan_scope()
+    session_id = str(session_id or "").strip()
+    if scope == SCOPE_PROFILE or not session_id:
+        return ""
+    if scope == SCOPE_PROJECT:
+        root = checkout_root(session_dir(session_id))
+        if root:
+            return f"project:{root}"
+    return f"session:{session_id}"
 
 
 def plan_path(plan_id: str) -> Path:
@@ -201,22 +310,32 @@ def load(plan_id: str) -> Optional[Dict[str, Any]]:
     return _read_json(plan_path(plan_id))
 
 
-def set_active(plan_id: str) -> None:
-    _write_json(active_path(), {"plan_id": plan_id, "at": _now()})
+def set_active(plan_id: str, key: str = "") -> None:
+    payload = {"plan_id": plan_id, "at": _now()}
+    if key:
+        payload["key"] = key
+    _write_json(active_path(key), payload)
 
 
-def active_plan_id() -> str:
-    payload = _read_json(active_path()) or {}
+def active_plan_id(key: str = "") -> str:
+    payload = _read_json(active_path(key)) or {}
     return str(payload.get("plan_id") or "")
 
 
-def active_plan() -> Optional[Dict[str, Any]]:
-    """The active plan, or the most recently updated one when nothing is pinned."""
-    plan_id = active_plan_id()
+def active_plan(key: str = "") -> Optional[Dict[str, Any]]:
+    """The active plan for ``key``.
+
+    The profile-wide pointer falls back to the most recently updated plan when
+    nothing is pinned. A scoped pointer never does: falling back there would
+    show (and let the agent edit) a plan that belongs to another session.
+    """
+    plan_id = active_plan_id(key)
     if plan_id:
         plan = load(plan_id)
         if plan is not None:
             return plan
+    if key:
+        return None
     recent = list_plans(limit=1, include_closed=True)
     return recent[0] if recent else None
 

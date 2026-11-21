@@ -80,24 +80,41 @@ function op(step) {
 
 // The session the user is looking at. Tile focus, not just the active tab, so
 // split views show the plan of whichever session was clicked last.
+//
+// `tracked` is false only on a Hermes too old to expose the focus atom; that
+// host gets the profile-wide /active, as before. A host that does track focus
+// but has no session focused (a fresh draft, the Bots home) has no plan to show.
 function useFocusedSession() {
   const atom = host && host.state ? host.state.focusedStoredSessionId : null
   const id = atom && typeof useValue === 'function' ? useValue(atom) : ''
-  return typeof id === 'string' ? id : ''
+  return { tracked: Boolean(atom), id: typeof id === 'string' ? id : '' }
 }
 
 function activePath(sessionId) {
   return sessionId ? `/active?session_id=${encodeURIComponent(sessionId)}` : '/active'
 }
 
+// The plan to draw for this focus, or null. Explicit on purpose: anything not
+// provably the focused session's plan clears the pane instead of leaving the
+// previous session's plan up — no focused session, or a reply the backend
+// stamped for a different session (an in-flight poll from the last click).
+function planView(data, focus) {
+  if (!data || !data.plan) return null
+  if (focus.tracked && !focus.id) return null
+  if (focus.id && typeof data.session_id === 'string' && data.session_id !== focus.id) return null
+  return data
+}
+
 function useActive() {
-  const sessionId = useFocusedSession()
-  return useQuery({
-    queryKey: [ID, 'active', sessionId],
-    queryFn: () => ctxRest(activePath(sessionId), { timeoutMs: 8000 }),
+  const focus = useFocusedSession()
+  const query = useQuery({
+    queryKey: [ID, 'active', focus.id],
+    queryFn: () => ctxRest(activePath(focus.id), { timeoutMs: 8000 }),
+    enabled: !focus.tracked || Boolean(focus.id),
     refetchInterval: 3000,
     retry: 1,
   })
+  return { ...query, data: planView(query.data, focus) }
 }
 
 /* ---------------- pieces ---------------- */

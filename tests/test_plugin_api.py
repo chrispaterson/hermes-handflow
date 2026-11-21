@@ -46,6 +46,11 @@ def test_active_returns_the_same_text_the_agent_reads(client, hf_home):
     assert body["current_step_id"] == body["plan"]["steps"][0]["id"]
 
 
+def test_active_reply_is_stamped_with_the_session_it_answers(client):
+    assert client.get("/api/plugins/handflow/active?session_id=local-abc").json()["session_id"] == "local-abc"
+    assert client.get("/api/plugins/handflow/active").json()["session_id"] == ""
+
+
 def test_the_pane_can_complete_a_step(client, hf_home):
     started = call(handflow, action="start", goal="g", steps=["one", "two"])
     step_id = started["plan_id"] and store.active_plan()["steps"][0]["id"]

@@ -78,8 +78,12 @@ def health() -> Dict[str, Any]:
 
 @router.get("/active")
 def active(session_id: str = "") -> JSONResponse:
-    """The active plan for the pane's focused session (``plan_scope`` decides the key)."""
-    return JSONResponse(_view(store.resolve(session_id)[1]))
+    """The active plan for the pane's focused session (``plan_scope`` decides the key).
+
+    The reply is stamped with the ``session_id`` it answers, so the pane can drop
+    a reply that lands after the user has already focused another session.
+    """
+    return JSONResponse({**_view(store.resolve(session_id)[1]), "session_id": session_id})
 
 
 @router.get("/plans")

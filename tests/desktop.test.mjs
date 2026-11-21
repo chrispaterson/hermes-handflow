@@ -186,11 +186,41 @@ test('the pane asks for the focused session\'s plan', async () => {
   assert.equal(calls.at(-1).path, '/active?session_id=local-abc%201')
 })
 
-test('without a focused session the pane falls back to /active', async () => {
-  for (const focused of [undefined, '', null]) {
-    const { registered, calls, queries } = load({ queryData: PLAN, focused })
-    texts(registered[0].render())
-    await queries.find((q) => q.queryKey.includes('active')).queryFn()
-    assert.equal(calls.at(-1).path, '/active')
+test('a Hermes without the focus atom still gets the profile-wide /active', async () => {
+  const { registered, calls, queries } = load({ queryData: PLAN })
+  const drawn = texts(registered[0].render()).join(' ')
+  assert.match(drawn, /Ship the catalog entry/)
+  await queries.find((q) => q.queryKey.includes('active')).queryFn()
+  assert.equal(calls.at(-1).path, '/active')
+})
+
+test('focus tracked but no session focused: pane is cleared and nothing is fetched', () => {
+  for (const focused of ['', null]) {
+    // queryData is a plan on purpose: a cached reply from the last session must not show.
+    const { registered, queries } = load({ queryData: PLAN, focused })
+    const drawn = texts(registered[0].render()).join(' ')
+    assert.match(drawn, /NO ACTIVE PLAN/)
+    assert.doesNotMatch(drawn, /Ship the catalog entry/)
+    assert.match(texts(registered[1].render()).join(' '), /▤ —/)
+    assert.equal(queries.find((q) => q.queryKey.includes('active')).enabled, false)
   }
+})
+
+test('a reply stamped for another session clears the pane', () => {
+  const { registered } = load({ queryData: { ...PLAN, session_id: 'local-old' }, focused: 'local-new' })
+  const drawn = texts(registered[0].render()).join(' ')
+  assert.match(drawn, /NO ACTIVE PLAN/)
+  assert.doesNotMatch(drawn, /Ship the catalog entry/)
+  assert.match(texts(registered[1].render()).join(' '), /▤ —/)
+})
+
+test('a reply stamped for the focused session draws its plan', () => {
+  const { registered, queries } = load({ queryData: { ...PLAN, session_id: 'local-new' }, focused: 'local-new' })
+  assert.match(texts(registered[0].render()).join(' '), /Ship the catalog entry/)
+  assert.notEqual(queries.find((q) => q.queryKey.includes('active')).enabled, false)
+})
+
+test('a focused session whose reply has no plan draws the empty state', () => {
+  const { registered } = load({ queryData: { ok: true, plan: null, session_id: 'local-new' }, focused: 'local-new' })
+  assert.match(texts(registered[0].render()).join(' '), /NO ACTIVE PLAN/)
 })
